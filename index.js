@@ -17,6 +17,10 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
+//teste
+function teste(){
+    console.log("teste");
+}
 
 app.listen(PORT, () => {
 	console.log(`Server started on port ${PORT}`)
