@@ -2,7 +2,7 @@ import express from "express"
 import cors from "cors"
 import { MongoClient } from "mongodb"
 // import dotenv from "dotenv"
-// import dayjs from "dayjs"
+import dayjs from "dayjs"
 
 const app = express()
 app.use(cors())
@@ -18,6 +18,9 @@ promise.then(() => (db = mongoClient.db("bate_papo_uol"),
 console.log("Conectado ao MongoDB")))
 promise.catch(e => console.log("deu ruim na conexão", e))
 
+let time
+const getTime = () => (time = dayjs().format("HH:mm:ss"))
+
 
 app.post("/participants", async (req, res) => {
 	const { name } = req.body;
@@ -27,15 +30,24 @@ app.post("/participants", async (req, res) => {
 		if (participant) return res.sendStatus(409) // o ususario ja exist
 
 		await db.collection("participants")
-		.insertOne({ name: name })
-		
-		let users = await db.collection("participants").find().toArray()
-		console.log(users)
+		.insertOne({ name: name , lastStatus: Date.now()})
 
 		res.status(201).send({ name })
 	} catch (error) {
 		console.log(error)
 		res.sendStatus(500)
+	}
+})
+
+app.get("/participants", async (req, res) => {
+	try {
+		const participants = await db.collection("participants")
+			.find({}).toArray()
+		res.status(200).send(participants)
+
+	} catch (error) {
+		console.log(error)
+		res.sendStatus(500) // erro interno
 	}
 })
 
