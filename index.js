@@ -1,113 +1,81 @@
-import express from "express";
-import cors from "cors";
-import { MongoClient } from "mongodb";
-// import dotenv from "dotenv"
-import dayjs from "dayjs";
+import express, { json } from 'express'
+import cors from 'cors'
+import chalk from 'chalk'
+import { MongoClient } from 'mongodb'
+import Joi from 'joi'
+import dotenv from 'dotenv'
+import dayjs from 'dayjs'
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+const app = express()
+app.use(cors())
+app.use(json())
 
-const PORT = 5000;
 
-// dotenv.config()
-const mongoClient = new MongoClient("mongodb://localhost:27017");
-let db;
-const promise = mongoClient.connect();
-promise.then(
-  () => (
-    (db = mongoClient.db("bate_papo_uol")), console.log("Conectado ao MongoDB")
-  )
-);
-promise.catch((e) => console.log("deu ruim na conexão", e));
+// Database connection
+let db = null
+dotenv.config()
+const mongoClient = new MongoClient(process.env.MONGO_URL) // process.env.MONGO_URI
+const promise = mongoClient.connect()
+        .then(()=>{
+            db = mongoClient.db(process.env.DATABASE) // process.env.BANCO
+            console.log(chalk.blue.bold('Banco de dados conectado com sucesso!'))
+        })
+        .catch(e => console.log(chalk.red.bold('Problema na conexão com o banco'), e))
 
-let time;
-const getTime = () => (time = dayjs().format("HH:mm:ss"));
 
-app.post("/participants", async (req, res) => {
-  const { name } = req.body;
-  try {
-    const participant = await db.collection("participants").findOne({ name });
-    if (participant) return res.sendStatus(409); // o ususario ja exist
+// Schemas for database collections
+const participant = Joi.object({
+    name: Joi.string().alphanum().min(1).required()
+})
 
-    await db
-      .collection("participants")
-      .insertOne({ name: name, lastStatus: Date.now() });
 
-    res.status(201).send({ name });
+// Listening
+app.listen(5000, () => console.log(chalk.bold.cyan('Server listening at http://localhost:5000')))
 
-  } catch (error) {
-    console.log(error);
-    res.sendStatus(500);
-  }
-});
 
-app.get("/participants", async (req, res) => {
-  try {
-    const participants = await db.collection("participants").find({}).toArray();
-    res.status(200).send(participants);
+// Requests
+app.post('/participants', async (req, res) => {
 
-  } catch (error) {
-    console.log(error);
-    res.sendStatus(500); // erro interno
-  }
-});
+    const { name } = req.body
 
-app.post("/messages", async (req, res) => {
-  // const validation = validate("POST-/messages", req)
-  // if (validation) return res.status(422).send(validation.map(e => e.message))
-  const { to, text, type } = req.body;
-  time = getTime();
-  const { user } = req.headers;
-  try {
-    await db
-      .collection("messages")
-      .insertOne({ from: user, to, text, type, time });
-    res.sendStatus(201);
+    const validation = participant.validate({ name }, { abortEarly: true })
+    if (validation.error) 
+        return res.status(422).send('Error validating participant name!')
 
-  } catch (error) {
-    console.log(error);
-    res.sendStatus(500);
-  }
-});
+    try{
+        await mongoClient.connect()
+        const dbParticipants = mongoClient.db(process.env.DATABASE).collection('participants')
+        const dbMessages = mongoClient.db(process.env.DATABASE).collection('messages')
 
-// app.get("/messages", async (req, res) => {
-//   const limit = parseInt(req.query.limit);
-//   const { user } = req.headers;
-//   const options = {
-//     limit,
-//     ...(limit && { sort: { $natural: -1 } }),
-//   };
-//   try {
-//     const messages = await db
-//       .collection("messages")
-//       .find({ $or: [{ to: "Todos" }, { to: user }] }, options)
-//       .toArray();
-//     res.status(200).send(messages.reverse());
+        const thereIsName = await dbParticipants.findOne({ name })
+        if (thereIsName)
+            return res.status(409).send(`There is already a user named ${name}`)
 
-//   } catch (error) {
-//     console.log(error);
-//     res.send(500, error);
-//   }
-// });
+        await dbParticipants.insertOne({ name, lastStatus: Date.now() })
+        await dbMessages.insertOne({from: name, 
+                                    to: 'Todos', 
+                                    text: 'entra na sala...', 
+                                    type: 'status',
+                                    time: dayjs().format('HH:mm:ss')
+                                })
 
-// app.post("/status", async (req, res) => {
-//   // const validation = validate("POST-/status", req)
-//   // if (validation) return res.status(422).send(validation.map(e => e.message))
-//   const { user } = req.headers;
-//   const lastStatus = Date.now();
-//   try {
-//     const isConnected = await db
-//       .collection("participants")
-//       .findOneAndUpdate({ name: user }, { $set: { lastStatus } });
-//     isConnected.value ? res.sendStatus(200) : res.sendStatus(404);
+        res.status(201).send('User inserted at participants database!')
+    }catch (e){
+        res.status(500).send(e)
+    }finally{
+        mongoClient.close()
+    }
+})
 
-//   } catch (error) {
-//     console.log(error);
-//     res.send(500, error);
-//   }
-// });
-
-app.listen(PORT, () => {
-  console.log(`Server started on port ${PORT}`);
-});
+app.get('/participants', async (req, res) => {
+    try{
+        await mongoClient.connect()
+        const dbParticipants = mongoClient.db(process.env.DATABASE).collection('participants')
+        const participantsList = dbParticipants.find().toArray()
+        res.send(participantsList)
+    }catch (e){
+        res.status(400).send(e)
+    }finally{
+        mongoClient.close()
+    }
+})
